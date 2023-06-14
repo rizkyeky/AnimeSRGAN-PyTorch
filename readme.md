@@ -14,3 +14,9 @@ pip install basicsr
 pip install coremltools
 ```
 
+| Deployment | Success |
+| ------ | ------ |
+| TorchScript | ✅ |
+| ONNX | ✅ |
+| CoreML | ValueError: Core ML only supports tensors with rank <= 5. Layer "x_view", with type "reshape", outputs a rank 6 tensor |
+
