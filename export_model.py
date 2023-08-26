@@ -9,6 +9,61 @@ sys.path.append('sr')
 from sr.animesr.archs.vsr_arch import MSRSWVSR
 from sr.scripts.inference_animesr_frames import *
 
+def roundToNearestMultipleOf10(num: int):
+    remainder = num % 10
+    return num - remainder
+
+def findNearestRatioOptions(first: int, second: int):
+  
+    index = 0
+
+    targetRatio = first / second
+    aspectRatios = [
+        1.0, # 1
+        4.0/3.0, # 1,3333
+        3.0/2.0, # 1,5
+        5.0/3.0, # 1,666
+        16.0/9.0 # 1,777
+    ]
+  
+    minDifference = abs(targetRatio - aspectRatios[0])
+    for i in range(5):
+        distance = abs(targetRatio - aspectRatios[i])
+        if (distance < minDifference):
+            minDifference = distance
+            index = i
+
+    return index
+
+def findPerfectSize(width: int, height: int) -> tuple:
+    width = roundToNearestMultipleOf10(width)
+    height = roundToNearestMultipleOf10(height)
+    ratioOptions = [
+        (1,1), # 1
+        (4,3), # 1,3333
+        (3,2), # 1,5
+        (5,3), # 1,6
+        (16,9) # 1,777
+    ]
+    newRatio = 1
+
+    if (width > height):
+        # Landscape
+        newIndex = findNearestRatioOptions(width, height)
+        newRatio = ratioOptions[newIndex]
+        height = int((width / newRatio[0]) * newRatio[1])
+        height = height if height % 2 == 0 else height+1
+        height += 2
+        height = height+2 if height % 10 == 0 else height+4
+    elif (width < height):
+        # Portrait
+        newIndex = findNearestRatioOptions(height, width)
+        newRatio = ratioOptions[newIndex]
+        width = int((height / newRatio[0]) * newRatio[1])
+        width = width if width % 2 == 0 else width+1
+
+    return (int(width), int(height))
+
 class AnimeSR(MSRSWVSR):
     def __init__(self, netscale):
         super(AnimeSR, self).__init__(64, [5, 3, 2], netscale)
@@ -38,14 +93,17 @@ if __name__ == '__main__':
     model.eval()
     model = model.to(device)
 
-    image1 = Image.open('rose_32.jpg')
-    image1 = transforms.ToTensor()(image1)
+    # image1 = Image.open('naruto.jpg')
+    # ow, oh = image1.size
+    # image1 = transforms.Resize((320,320))(image1)
+    # image1 = transforms.ToTensor()(image1)
 
     # output = model(image1)
     # output = transforms.ToPILImage()(output)
-    # output.save('output.jpg')
+    # output = transforms.Resize((oh*2,ow*2))(output)
+    # output.save('naruto1_output1.jpg')
 
-    example_input = torch.rand(3, 224, 224)
+    example_input = torch.rand(3, 320, 320)
     traced_model = torch.jit.trace(model, example_input)
 
     scripted_model = torch.jit.script(traced_model)
@@ -57,6 +115,7 @@ if __name__ == '__main__':
         "animesr.onnx",
         input_names = ['input'],
         output_names = ['output'],
+        # dynamic_axes = {'input': {1:'width', 2:'height'}, 'output':{1:'width', 2:'height'}}, 
         opset_version = 16,
         # operator_export_type = torch.onnx.OperatorExportTypes.ONNX_ATEN
     )
