@@ -4,6 +4,7 @@ from PIL import Image
 # import coremltools as ct
 import torchvision.transforms as transforms
 from torch.utils.mobile_optimizer import optimize_for_mobile
+from torch.nn import functional as F
 
 sys.path.append('sr')
 from sr.animesr.archs.vsr_arch import MSRSWVSR
@@ -68,14 +69,29 @@ class AnimeSR(MSRSWVSR):
     def __init__(self, netscale):
         super(AnimeSR, self).__init__(64, [5, 3, 2], netscale)
     
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = x.unsqueeze(0)
+    def _forward(self, x: torch.Tensor) -> torch.Tensor:
         b, c, h, w = x.size()
         state = x.new_zeros(1, 64, h, w)
         out = x.new_zeros(1, c, h * self.netscale, w * self.netscale)
         stack = torch.cat((x, x, x), dim=1)
         out, state = self.cell(stack, out, state)
         return out.squeeze(0)
+    
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        assert len(x.shape) == 4
+        x, ori_h, ori_w = self.pre_process(x)
+        x = self._forward(x)
+        x = x.unsqueeze(0)
+        x = F.interpolate(input=x, size=(ori_h*self.netscale, ori_w*self.netscale), mode="bilinear", align_corners=False)
+        return x
+    
+    def pre_process(self, input: torch.Tensor) -> (torch.Tensor, int, int):
+        output_stride = 32
+        ori_height, ori_width = input.shape[2:]
+        new_h = (ori_height // output_stride) * output_stride
+        new_w = (ori_width // output_stride) * output_stride
+        output = F.interpolate(input=input, size=(new_h, new_w), mode="bilinear", align_corners=False)
+        return output, ori_height, ori_width
 
 if __name__ == '__main__':
 
