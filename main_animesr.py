@@ -10,67 +10,13 @@ sys.path.append('sr')
 from sr.animesr.archs.vsr_arch import MSRSWVSR
 from sr.scripts.inference_animesr_frames import *
 
-def roundToNearestMultipleOf10(num: int):
-    remainder = num % 10
-    return num - remainder
-
-def findNearestRatioOptions(first: int, second: int):
-  
-    index = 0
-
-    targetRatio = first / second
-    aspectRatios = [
-        1.0, # 1
-        4.0/3.0, # 1,3333
-        3.0/2.0, # 1,5
-        5.0/3.0, # 1,666
-        16.0/9.0 # 1,777
-    ]
-  
-    minDifference = abs(targetRatio - aspectRatios[0])
-    for i in range(5):
-        distance = abs(targetRatio - aspectRatios[i])
-        if (distance < minDifference):
-            minDifference = distance
-            index = i
-
-    return index
-
-def findPerfectSize(width: int, height: int) -> tuple:
-    width = roundToNearestMultipleOf10(width)
-    height = roundToNearestMultipleOf10(height)
-    ratioOptions = [
-        (1,1), # 1
-        (4,3), # 1,3333
-        (3,2), # 1,5
-        (5,3), # 1,6
-        (16,9) # 1,777
-    ]
-    newRatio = 1
-
-    if (width > height):
-        # Landscape
-        newIndex = findNearestRatioOptions(width, height)
-        newRatio = ratioOptions[newIndex]
-        height = int((width / newRatio[0]) * newRatio[1])
-        height = height if height % 2 == 0 else height+1
-        height += 2
-        height = height+2 if height % 10 == 0 else height+4
-    elif (width < height):
-        # Portrait
-        newIndex = findNearestRatioOptions(height, width)
-        newRatio = ratioOptions[newIndex]
-        width = int((height / newRatio[0]) * newRatio[1])
-        width = width if width % 2 == 0 else width+1
-
-    return (int(width), int(height))
-
 class AnimeSR(MSRSWVSR):
     def __init__(self, netscale):
         super(AnimeSR, self).__init__(64, [5, 3, 2], netscale)
     
     def _forward(self, x: torch.Tensor) -> torch.Tensor:
-        b, c, h, w = x.size()
+        c, h, w = x.size()
+        x = x.unsqueeze(0)
         state = x.new_zeros(1, 64, h, w)
         out = x.new_zeros(1, c, h * self.netscale, w * self.netscale)
         stack = torch.cat((x, x, x), dim=1)
@@ -78,8 +24,10 @@ class AnimeSR(MSRSWVSR):
         return out.squeeze(0)
     
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        assert len(x.shape) == 4
+        assert len(x.shape) == 3
+        # print(x.shape)
         x, ori_h, ori_w = self.pre_process(x)
+        # print(x.shape)
         x = self._forward(x)
         x = x.unsqueeze(0)
         x = F.interpolate(input=x, size=(ori_h*self.netscale, ori_w*self.netscale), mode="bilinear", align_corners=False)
@@ -87,87 +35,46 @@ class AnimeSR(MSRSWVSR):
     
     def pre_process(self, input: torch.Tensor) -> (torch.Tensor, int, int):
         output_stride = 32
-        ori_height, ori_width = input.shape[2:]
+        ori_height, ori_width = input.shape[1:]
         new_h = (ori_height // output_stride) * output_stride
         new_w = (ori_width // output_stride) * output_stride
+        input = input.unsqueeze(0)
         output = F.interpolate(input=input, size=(new_h, new_w), mode="bilinear", align_corners=False)
+        output = output.squeeze()
         return output, ori_height, ori_width
 
 if __name__ == '__main__':
 
-    netscale = 4
-    # mod_scale = 4
-    # input_rescaling_factor = 1.0
     device = torch.device('cpu')
    
-    model = AnimeSR(netscale=netscale)
+    model = AnimeSR(netscale=4)
    
-    model_path = 'sr/weights/AnimeSR_v2.pth'
+    model_path = '/Users/eky/Projects/_pretrained/animesr/AnimeSR_v2.pth'
    
     loadnet = torch.load(model_path)
     model.load_state_dict(loadnet, strict=True)
-    model.eval()
-    model = model.to(device)
 
-    # image1 = Image.open('naruto.jpg')
-    # ow, oh = image1.size
-    # image1 = transforms.Resize((320,320))(image1)
-    # image1 = transforms.ToTensor()(image1)
+    # model = mobilenet_v3_large(weights='DEFAULT')
 
-    # output = model(image1)
-    # output = transforms.ToPILImage()(output)
-    # output = transforms.Resize((oh*2,ow*2))(output)
-    # output.save('naruto1_output1.jpg')
+    model.train(False)
+    model.cpu().eval()
 
-    example_input = torch.rand(3, 320, 320)
-    traced_model = torch.jit.trace(model, example_input)
+    img = cv2.imread('imgs/rose.jpg')
+    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    img = cv2.resize(img, (320,320))
+    img = (np.array(img) / 255.0).astype(np.float32)
+    img = np.transpose(img, (2, 0, 1))
+    # img = np.expand_dims(img, 0)
 
-    scripted_model = torch.jit.script(traced_model)
-    # optimized_model = optimize_for_mobile(scripted_model)
-    # optimized_model.save('animesr.pt')
+    input_tensor = torch.from_numpy(img)
 
-    torch.onnx.export(scripted_model,
-        example_input,
-        "animesr.onnx",
-        input_names = ['input'],
-        output_names = ['output'],
-        # dynamic_axes = {'input': {1:'width', 2:'height'}, 'output':{1:'width', 2:'height'}}, 
-        opset_version = 16,
-        # operator_export_type = torch.onnx.OperatorExportTypes.ONNX_ATEN
-    )
-
-    # input_shape = ct.Shape(shape=(3,
-    #     ct.RangeDim(lower_bound=64, upper_bound=1024, default=512),
-    #     ct.RangeDim(lower_bound=64, upper_bound=1024, default=512)
-    # ))
-
-    # ct_model = ct.convert(traced_model,
-    #     inputs=[ct.ImageType(
-    #         shape=input_shape,
-    #         scale=1/255,
-    #         color_layout=ct.colorlayout.RGB,
-    #         # name="input"
-    #     )],
-    #     outputs=[ct.ImageType(
-    #         color_layout=ct.colorlayout.RGB
-    #     )],
-    #     # compute_units=ct.ComputeUnit.ALL,
-    #     # minimum_deployment_target=ct.target.iOS16,
-    #     # compute_precision=ct.precision.FLOAT32,
-    #     # convert_to="mlprogram",
-    # )
-
-    # ct_model.save('animesr.mlmodel')
-   
-    # image_input = ct.ImageType(shape=(1, 224, 224, 3,),
-    #                         bias=[-1,-1,-1], scale=1/127)
-   
-    # classifier_config = ct.ClassifierConfig(class_labels)
-   
-    # model = ct.convert(
-    #     model, 
-    #     convert_to="mlprogram",
-    #     # inputs=[image_input], 
-    #     # classifier_config=classifier_config,
-    # )
+    output = model(input_tensor)
+    
+    output = output.cpu().detach().numpy()
+    output = output.clip(0, 1) * 255
+    output = output.astype(np.uint8)
+    output = np.squeeze(output)
+    output = np.transpose(output, (1, 2, 0))
+    output = cv2.cvtColor(output, cv2.COLOR_RGB2BGR)
+    cv2.imwrite('outputs/rose_animesr.jpg', output)
 

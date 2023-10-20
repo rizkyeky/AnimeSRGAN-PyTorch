@@ -4,11 +4,16 @@ import onnxruntime
 import numpy as np
 import cv2
 
-if __name__ == '__main__':
-    session = onnxruntime.InferenceSession('animesr.onnx')
+def open_with_opencv():
+    net = cv2.dnn.readNetFromONNX('animesr_320_nobatch.onnx')
 
-    img = cv2.imread('rose.jpg')
-    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+def open_with_onnxruntime():
+    session = onnxruntime.InferenceSession('/Users/eky/Projects/_pretrained/animesr.onnx')
+
+    ori_img = cv2.imread('imgs/naruto.jpg')
+    ori_h, ori_w, _ = ori_img.shape
+    img = cv2.cvtColor(ori_img, cv2.COLOR_BGR2RGB)
+    img = cv2.resize(img, (512,512))
     img = (np.array(img) / 255.0).astype(np.float32)
     img = np.transpose(img, (2, 0, 1))
     img = np.expand_dims(img, 0)
@@ -24,5 +29,17 @@ if __name__ == '__main__':
     output = np.squeeze(output)
     output = np.transpose(output, (1, 2, 0))
     output = cv2.cvtColor(output, cv2.COLOR_RGB2BGR)
-    cv2.imwrite('rose_animesr.jpg', output)
+    output = cv2.resize(output, (ori_w*4, ori_h*4))
+    # cv2.imwrite('naruto_animesr.jpg', output)
 
+    ori_img = cv2.resize(ori_img, (ori_w*2, ori_h*2))
+    output = cv2.resize(output, (ori_w*2, ori_h*2))
+    stack = np.column_stack((ori_img, output))
+
+    cv2.imshow('output', stack)
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
+
+if __name__ == '__main__':
+    open_with_onnxruntime()
+    # open_with_opencv()
